@@ -39,7 +39,7 @@
 #define file_name_t            std::string
 #define imread_t               cv::imread
 #define NMS_THRESH 0.5
-#define BBOX_CONF_THRESH 0.3
+#define BBOX_CONF_THRESH 0.7
 
 static const int INPUT_W = 416;
 static const int INPUT_H = 416;
@@ -88,7 +88,7 @@ cv::Mat static_resize(cv::Mat& img) {
     return out;
 }
 
-struct Object
+struct Prediction
 {
     cv::Rect_<float> rect;
     int label;
@@ -119,7 +119,7 @@ static void generate_grids_and_stride(const int target_w, const int target_h, st
 }
 
 
-static void generate_yolox_proposals(std::vector<GridAndStride> grid_strides, const float* feat_ptr, float prob_threshold, std::vector<Object>& objects)
+static void generate_yolox_proposals(std::vector<GridAndStride> grid_strides, const float* feat_ptr, float prob_threshold, std::vector<Prediction>& predictions)
 {
 
     const int num_anchors = grid_strides.size(); std::cout <<"size grid_strides: " << grid_strides.size()<< std::endl;
@@ -158,7 +158,7 @@ static void generate_yolox_proposals(std::vector<GridAndStride> grid_strides, co
             float box_prob = box_objectness * box_cls_score; ///std::cout <<"box_prob: " << box_prob<< std::endl;
             if (box_prob > prob_threshold)
             {
-                Object obj;
+                Prediction obj;
                 obj.rect.x = x0;
                 obj.rect.y = y0;
                 obj.rect.width = w;
@@ -166,9 +166,7 @@ static void generate_yolox_proposals(std::vector<GridAndStride> grid_strides, co
                 obj.label = class_idx;
                 obj.prob = box_prob;
 
-               
-
-                objects.push_back(obj);
+                predictions.push_back(obj);
             }
 
         } // class loop
@@ -176,13 +174,13 @@ static void generate_yolox_proposals(std::vector<GridAndStride> grid_strides, co
     } // point anchor loop
 }
 
-static inline float intersection_area(const Object& a, const Object& b)
+static inline float intersection_area(const Prediction& a, const Prediction& b)
 {
     cv::Rect_<float> inter = a.rect & b.rect;
     return inter.area();
 }
 
-static void qsort_descent_inplace(std::vector<Object>& faceobjects, int left, int right)
+static void qsort_descent_inplace(std::vector<Prediction>& faceobjects, int left, int right)
 {
     int i = left;
     int j = right;
@@ -220,15 +218,15 @@ static void qsort_descent_inplace(std::vector<Object>& faceobjects, int left, in
 }
 
 
-static void qsort_descent_inplace(std::vector<Object>& objects)
+static void qsort_descent_inplace(std::vector<Prediction>& predictions)
 {
-    if (objects.empty())
+    if (predictions.empty())
         return;
 
-    qsort_descent_inplace(objects, 0, objects.size() - 1);
+    qsort_descent_inplace(predictions, 0, predictions.size() - 1);
 }
 
-static void nms_sorted_bboxes(const std::vector<Object>& faceobjects, std::vector<int>& picked, float nms_threshold)
+static void nms_sorted_bboxes(const std::vector<Prediction>& faceobjects, std::vector<int>& picked, float nms_threshold)
 {
     picked.clear();
 
@@ -242,12 +240,12 @@ static void nms_sorted_bboxes(const std::vector<Object>& faceobjects, std::vecto
 
     for (int i = 0; i < n; i++)
     {
-        const Object& a = faceobjects[i];
+        const Prediction& a = faceobjects[i];
 
         int keep = 1;
         for (int j = 0; j < (int)picked.size(); j++)
         {
-            const Object& b = faceobjects[picked[j]];
+            const Prediction& b = faceobjects[picked[j]];
 
             // intersection over union
             float inter_area = intersection_area(a, b);
@@ -263,8 +261,8 @@ static void nms_sorted_bboxes(const std::vector<Object>& faceobjects, std::vecto
 }
 
 
-static void decode_outputs(const float* prob, std::vector<Object>& objects, float scale, const int img_w, const int img_h) {
-        std::vector<Object> proposals;
+static void decode_outputs(const float* prob, std::vector<Prediction>& predictions, float scale, const int img_w, const int img_h) {
+        std::vector<Prediction> proposals;
         std::vector<int> strides = {8, 16, 32};
         std::vector<GridAndStride> grid_strides;
 
@@ -275,17 +273,17 @@ static void decode_outputs(const float* prob, std::vector<Object>& objects, floa
         std::vector<int> picked;
         nms_sorted_bboxes(proposals, picked, NMS_THRESH);
         int count = picked.size();
-        objects.resize(count);
+        predictions.resize(count);
 
         for (int i = 0; i < count; i++)
         {
-            objects[i] = proposals[picked[i]];
+            predictions[i] = proposals[picked[i]];
 
             // adjust offset to original unpadded
-            float x0 = (objects[i].rect.x) / scale;
-            float y0 = (objects[i].rect.y) / scale;
-            float x1 = (objects[i].rect.x + objects[i].rect.width) / scale;
-            float y1 = (objects[i].rect.y + objects[i].rect.height) / scale;
+            float x0 = (predictions[i].rect.x) / scale;
+            float y0 = (predictions[i].rect.y) / scale;
+            float x1 = (predictions[i].rect.x + predictions[i].rect.width) / scale;
+            float y1 = (predictions[i].rect.y + predictions[i].rect.height) / scale;
 
             // clip
             x0 = std::max(std::min(x0, (float)(img_w - 1)), 0.f);
@@ -293,10 +291,10 @@ static void decode_outputs(const float* prob, std::vector<Object>& objects, floa
             x1 = std::max(std::min(x1, (float)(img_w - 1)), 0.f);
             y1 = std::max(std::min(y1, (float)(img_h - 1)), 0.f);
 
-            objects[i].rect.x = x0;
-            objects[i].rect.y = y0;
-            objects[i].rect.width = x1 - x0;
-            objects[i].rect.height = y1 - y0;
+            predictions[i].rect.x = x0;
+            predictions[i].rect.y = y0;
+            predictions[i].rect.width = x1 - x0;
+            predictions[i].rect.height = y1 - y0;
         }
 }
 
@@ -384,7 +382,7 @@ const float color_list[80][3] =
     {0.50, 0.5, 0}
 };
 
-static void draw_objects(const cv::Mat& bgr, const std::vector<Object>& objects)
+static void draw_objects(const cv::Mat& bgr, const std::vector<Prediction>& predictions)
 {
     
 
@@ -404,9 +402,9 @@ static void draw_objects(const cv::Mat& bgr, const std::vector<Object>& objects)
 
     cv::Mat image = bgr.clone();
 
-    for (size_t i = 0; i < objects.size(); i++)
+    for (size_t i = 0; i < predictions.size(); i++)
     {
-        const Object& obj = objects[i];
+        const Prediction& obj = predictions[i];
 
         cv::Scalar color = cv::Scalar(color_list[obj.label][0], color_list[obj.label][1], color_list[obj.label][2]);
         float c_mean = cv::mean(color)[0];
@@ -442,7 +440,7 @@ static void draw_objects(const cv::Mat& bgr, const std::vector<Object>& objects)
                     cv::FONT_HERSHEY_SIMPLEX, 0.4, txt_color, 1);
     }
 
-    cv::imwrite("_demo.jpg" , image);
+    cv::imwrite("../../_onnx_pred.jpg" , image);
     fprintf(stderr, "save vis file\n");
     /* cv::imshow("image", image); */
     /* cv::waitKey(0); */
@@ -622,98 +620,111 @@ int main(int argc, char* argv[])
         int  bufferLength = msg.parts[0].body.size();
         WriteToFile("image.jpg", msg.parts[0].body);
 
-        return "it works!";
+        std::string instanceName{"image-classification-inference"};
+        std::string modelFilepath{"../best_yolox_nano.onnx"};
+        // std::string modelFilepath{"../yolov5s.onnx"};
+        std::string imageFilepath{"image.jpg"};
+        std::string labelFilepath{"../synset.txt"};
+
+        std::vector<std::string> labels{readLabels(labelFilepath)};
+
+
+        Ort::Env env(OrtLoggingLevel::ORT_LOGGING_LEVEL_WARNING, instanceName.c_str());
+        Ort::SessionOptions sessionOptions;
+        sessionOptions.SetIntraOpNumThreads(1);
+        sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
+
+        Ort::Session session(env, modelFilepath.c_str(), sessionOptions);
+        Ort::AllocatorWithDefaultOptions allocator;
+
+        size_t numInputNodes = session.GetInputCount();
+        size_t numOutputNodes = session.GetOutputCount();
+
+        Ort::AllocatedStringPtr inputNameUPtr = session.GetInputNameAllocated(0, allocator);
+        const char* inputName{inputNameUPtr.get()};
+        //std::cout << "Input Name: " << inputName << std::endl;
+
+        Ort::TypeInfo inputTypeInfo = session.GetInputTypeInfo(0);
+        auto inputTensorInfo = inputTypeInfo.GetTensorTypeAndShapeInfo();
+
+        ONNXTensorElementDataType inputType = inputTensorInfo.GetElementType();
+        //std::cout << "Input Type: " << inputType << std::endl;
+
+        std::vector<int64_t> inputDims = inputTensorInfo.GetShape();
+        //std::cout << "Input Dimensions: " << inputDims << std::endl;
+
+        Ort::AllocatedStringPtr outputNameUPtr = session.GetOutputNameAllocated(0, allocator);
+        const char* outputName{outputNameUPtr.get()};
+        //std::cout << "Output Name: " << outputName << std::endl;
+
+        Ort::TypeInfo outputTypeInfo = session.GetOutputTypeInfo(0);
+        auto outputTensorInfo = outputTypeInfo.GetTensorTypeAndShapeInfo();
+
+        ONNXTensorElementDataType outputType = outputTensorInfo.GetElementType();
+        //std::cout << "Output Type: " << outputType << std::endl;
+
+        std::vector<int64_t> outputDims = outputTensorInfo.GetShape();
+        //std::cout << "Output Dimensions: " << outputDims << std::endl;
+
+        cv::Mat imageBGR = cv::imread(imageFilepath, cv::ImreadModes::IMREAD_COLOR);
+        cv::Mat preprocessedImage;
+
+        cv::Mat resizedImage = static_resize(imageBGR);
+        cv::dnn::blobFromImage(resizedImage, preprocessedImage);
+    // cv::imwrite("image.jpg", resizedImage);
+
+
+        size_t inputTensorSize = vectorProduct(inputDims);
+        std::vector<float> inputTensorValues(inputTensorSize);
+        inputTensorValues.assign(preprocessedImage.begin<float>(),
+                                preprocessedImage.end<float>()); 
+
+        size_t outputTensorSize = vectorProduct(outputDims);
+        std::vector<float> outputTensorValues(outputTensorSize);
+
+        std::vector<const char*> inputNames{inputName};
+        std::vector<const char*> outputNames{outputName};
+        std::vector<Ort::Value> inputTensors;
+        std::vector<Ort::Value> outputTensors;
+
+        Ort::MemoryInfo memoryInfo = Ort::MemoryInfo::CreateCpu(
+            OrtAllocatorType::OrtArenaAllocator, OrtMemType::OrtMemTypeDefault);
+        inputTensors.push_back(Ort::Value::CreateTensor<float>(
+            memoryInfo, inputTensorValues.data(), inputTensorSize, inputDims.data(),
+            inputDims.size()));
+        outputTensors.push_back(Ort::Value::CreateTensor<float>(
+            memoryInfo, outputTensorValues.data(), outputTensorSize,
+            outputDims.data(), outputDims.size()));
+
+        session.Run(Ort::RunOptions{nullptr}, inputNames.data(), inputTensors.data(), 
+                    1, outputNames.data(), outputTensors.data(), 1);
+
+        cv::Mat image = imread_t(imageFilepath);
+        int img_w = image.cols;
+        int img_h = image.rows;
+        float scale = std::min(INPUT_W / (image.cols*1.0), INPUT_H / (image.rows*1.0));
+        std::vector<Prediction> predictions;
+
+        const float * net_pred = outputTensorValues.data();
+        decode_outputs(net_pred, predictions, scale, img_w, img_h);
+
+        std::string response = "[";
+        for (int i = 0; i < predictions.size(); i++)
+        {
+            const auto & pred = predictions[i];
+            response += "{\"xmin\":" + std::to_string(pred.rect.x) + ",\"ymin\":" + std::to_string(pred.rect.y) + \
+                        ",\"xmax\":" + std::to_string(pred.rect.x + pred.rect.width) +  \
+                        ",\"ymax\":" + std::to_string(pred.rect.y + pred.rect.height) + \
+                        ",\"confidence\":" + std::to_string(pred.prob) + \
+                        ",\"class\":" + std::to_string(pred.label) + \
+                        ",\"name\":" + "\"alma\"" + "}";
+            if (i < predictions.size() - 1)
+                response += ",";
+        }
+        response += "]";
+        return response;
     });
 
     app.port(3000).multithreaded().run();
-
-//     std::string instanceName{"image-classification-inference"};
-//     std::string modelFilepath{"../best_yolox_nano.onnx"};
-//     std::string imageFilepath{"../demo.jpg"};
-//     std::string labelFilepath{"../synset.txt"};
-
-//     std::vector<std::string> labels{readLabels(labelFilepath)};
-
-
-//     Ort::Env env(OrtLoggingLevel::ORT_LOGGING_LEVEL_WARNING, instanceName.c_str());
-//     Ort::SessionOptions sessionOptions;
-//     sessionOptions.SetIntraOpNumThreads(1);
-//     sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
-
-//     Ort::Session session(env, modelFilepath.c_str(), sessionOptions);
-//     Ort::AllocatorWithDefaultOptions allocator;
-
-//     size_t numInputNodes = session.GetInputCount();
-//     size_t numOutputNodes = session.GetOutputCount();
-
-//     Ort::AllocatedStringPtr inputNameUPtr = session.GetInputNameAllocated(0, allocator);
-//     const char* inputName{inputNameUPtr.get()};
-//     //std::cout << "Input Name: " << inputName << std::endl;
-
-//     Ort::TypeInfo inputTypeInfo = session.GetInputTypeInfo(0);
-//     auto inputTensorInfo = inputTypeInfo.GetTensorTypeAndShapeInfo();
-
-//     ONNXTensorElementDataType inputType = inputTensorInfo.GetElementType();
-//     //std::cout << "Input Type: " << inputType << std::endl;
-
-//     std::vector<int64_t> inputDims = inputTensorInfo.GetShape();
-//     //std::cout << "Input Dimensions: " << inputDims << std::endl;
-
-//     Ort::AllocatedStringPtr outputNameUPtr = session.GetOutputNameAllocated(0, allocator);
-//     const char* outputName{outputNameUPtr.get()};
-//     //std::cout << "Output Name: " << outputName << std::endl;
-
-//     Ort::TypeInfo outputTypeInfo = session.GetOutputTypeInfo(0);
-//     auto outputTensorInfo = outputTypeInfo.GetTensorTypeAndShapeInfo();
-
-//     ONNXTensorElementDataType outputType = outputTensorInfo.GetElementType();
-//     //std::cout << "Output Type: " << outputType << std::endl;
-
-//     std::vector<int64_t> outputDims = outputTensorInfo.GetShape();
-//     //std::cout << "Output Dimensions: " << outputDims << std::endl;
-
-//     cv::Mat imageBGR = cv::imread(imageFilepath, cv::ImreadModes::IMREAD_COLOR);
-//     cv::Mat preprocessedImage;
-
-//     cv::Mat resizedImage = static_resize(imageBGR);
-//     cv::dnn::blobFromImage(resizedImage, preprocessedImage);
-//    // cv::imwrite("image.jpg", resizedImage);
-
-
-//     size_t inputTensorSize = vectorProduct(inputDims);
-//     std::vector<float> inputTensorValues(inputTensorSize);
-//     inputTensorValues.assign(preprocessedImage.begin<float>(),
-//                              preprocessedImage.end<float>()); 
-
-//     size_t outputTensorSize = vectorProduct(outputDims);
-//     std::vector<float> outputTensorValues(outputTensorSize);
-
-//     std::vector<const char*> inputNames{inputName};
-//     std::vector<const char*> outputNames{outputName};
-//     std::vector<Ort::Value> inputTensors;
-//     std::vector<Ort::Value> outputTensors;
-
-//     Ort::MemoryInfo memoryInfo = Ort::MemoryInfo::CreateCpu(
-//         OrtAllocatorType::OrtArenaAllocator, OrtMemType::OrtMemTypeDefault);
-//     inputTensors.push_back(Ort::Value::CreateTensor<float>(
-//         memoryInfo, inputTensorValues.data(), inputTensorSize, inputDims.data(),
-//         inputDims.size()));
-//     outputTensors.push_back(Ort::Value::CreateTensor<float>(
-//         memoryInfo, outputTensorValues.data(), outputTensorSize,
-//         outputDims.data(), outputDims.size()));
-
-//     session.Run(Ort::RunOptions{nullptr}, inputNames.data(), inputTensors.data(), 
-//                 1, outputNames.data(), outputTensors.data(), 1);
-
-//     cv::Mat image = imread_t(imageFilepath);
-//     int img_w = image.cols;
-//     int img_h = image.rows;
-//     float scale = std::min(INPUT_W / (image.cols*1.0), INPUT_H / (image.rows*1.0));
-//     std::vector<Object> objects;
-
-//     const float * net_pred = outputTensorValues.data();
-//     decode_outputs(net_pred, objects, scale, img_w, img_h);
-//     draw_objects(image, objects);
-
 }
 
