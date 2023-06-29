@@ -4,13 +4,11 @@ Deploy YoloV5
 
 ## Used repository
 
-* [GitHub - ultralytics/yolov5: YOLOv5 🚀 in PyTorch &gt; ONNX &gt; CoreML &gt; TFLite](https://github.com/ultralytics/yolov5)
+- [GitHub - ultralytics/yolov5: YOLOv5 🚀 in PyTorch &gt; ONNX &gt; CoreML &gt; TFLite](https://github.com/ultralytics/yolov5)
 
-* [GitHub - freshtechyy/ONNX-Runtime-GPU-image-classifciation-example](https://github.com/freshtechyy/ONNX-Runtime-GPU-image-classifciation-example)
+- [GitHub - freshtechyy/ONNX-Runtime-GPU-image-classifciation-example](https://github.com/freshtechyy/ONNX-Runtime-GPU-image-classifciation-example)
 
 ## Tutorials
-
-* [File Transfer via Sockets in Python - YouTube](https://www.youtube.com/watch?v=qFVoMo6OMsQ)
 
 Python yolov5 flask docker file
 
@@ -21,12 +19,12 @@ https://github.com/prince776/yt-projects/tree/master/cppREST
 
 curl -X POST -F image=@image.jpg 'http://localhost:5000/v1/object-detection/yolov5'
 
-- [ ] create docker files
+- [x] create docker files
 - [ ] using COCO model in C++
 - [ ] check C++ code deeper
-- [ ] update presentation
-  - [ ] endpoints
-  - [ ] use case
+- [x] update presentation
+  - [x] endpoints
+  - [x] use case
 
 # Docker
 
@@ -39,18 +37,29 @@ docker build -t  yolov5-flask dockerfiles/restapi-python.Dockerfile
 docker run -p 5000:5000 yolov5-flask:latest
 ```
 
-
-
-
-
 Run RestAPI client:
 
 ```
-python request.py --image_path="../demo.jpg" --port=5000 --conf=0.4
+python restapi-client.py --image_path="../demo.jpg" --port=5000 --conf=0.4
 ```
 
+```
 
+```
 
+Install NVidia toolkit
 
+```
+sudo apt-get install -y nvidia-container-toolkit
+```
 
-docker run -it e8ee9478d3a5 bash
+## CPP docker TODO
+
+- Add `sudo apt install nvidia-cuda-toolkit`
+
+Export .pt file to .onnx
+https://colab.research.google.com/drive/1V-F3erKkPun-vNn28BoOc6ENKmfo8kDh?usp=sharing#scrollTo=12t-V70DmpSl
+
+```
+cmake .. && make && ./src/main --model_path ../yolov5s6.onnx --class_names ../coco.names --gpu --port 3000
+```

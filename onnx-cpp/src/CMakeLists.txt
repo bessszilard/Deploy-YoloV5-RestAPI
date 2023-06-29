@@ -6,6 +6,6 @@ set(CMAKE_BUILD_TYPE RelWithDebInfo)
 
 include_directories(../include)
 
-add_executable(main main.cpp onnxHandler.cpp)
+add_executable(main main.cpp detector.cpp utils.cpp)
 target_include_directories(main PRIVATE ${ONNXRUNTIME_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS})
 target_link_libraries(main PRIVATE ${ONNXRUNTIME_LIB} ${OpenCV_LIBRARIES})
